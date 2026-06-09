@@ -32,6 +32,7 @@ router.put('/me/password', auth, async (req, res) => {
   if (!newPassword || newPassword.length < 6)
     return res.status(400).json({ msg: 'Mínimo 6 caracteres' })
 
+  // Usa a service_role key para ter permissão de alterar senha
   const { createClient } = require('@supabase/supabase-js')
   const adminClient = createClient(
     process.env.SUPABASE_URL,
@@ -40,41 +41,6 @@ router.put('/me/password', auth, async (req, res) => {
   const { error } = await adminClient.auth.admin.updateUserById(req.userId, { password: newPassword })
   if (error) return res.status(500).json({ msg: error.message })
   res.json({ msg: 'Senha alterada com sucesso' })
-})
-
-// --- SEGUIR ---
-// Listar quem eu sigo
-router.get('/me/following', auth, async (req, res) => {
-  const { data, error } = await supabase
-    .from('connections')
-    .select('following_id')
-    .eq('follower_id', req.userId)
-  if (error) return res.status(500).json({ msg: error.message })
-  res.json((data || []).map(r => r.following_id))
-})
-
-// Seguir usuário
-router.post('/follow/:id', auth, async (req, res) => {
-  const { id } = req.params
-  if (id === req.userId) return res.status(400).json({ msg: 'Você não pode seguir a si mesmo' })
-
-  const { error } = await supabase
-    .from('connections')
-    .upsert({ follower_id: req.userId, following_id: id }, { onConflict: 'follower_id,following_id' })
-  if (error) return res.status(500).json({ msg: error.message })
-  res.json({ msg: 'Seguindo' })
-})
-
-// Deixar de seguir
-router.delete('/follow/:id', auth, async (req, res) => {
-  const { id } = req.params
-  const { error } = await supabase
-    .from('connections')
-    .delete()
-    .eq('follower_id', req.userId)
-    .eq('following_id', id)
-  if (error) return res.status(500).json({ msg: error.message })
-  res.json({ msg: 'Deixou de seguir' })
 })
 
 // --- FORMAÇÃO ---

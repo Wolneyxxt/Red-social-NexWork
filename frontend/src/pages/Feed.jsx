@@ -29,7 +29,6 @@ function PostCard({ post, currentUser, onDelete }) {
 
   const isOwner = post.author_id === currentUser?.id || post.author?.id === currentUser?.id
   const isLiked = likes.some(l => l.user_id === currentUser?.id)
-  const isRecruiter = currentUser?.account_type === 'recruiter'
 
   const handleLike = async () => {
     if (loadingLike) return
@@ -54,8 +53,6 @@ function PostCard({ post, currentUser, onDelete }) {
     setLoadingComment(true)
     try {
       const { data } = await api.post(`/posts/${post.id}/comments`, { text: comment })
-      // Se o backend não retornar o perfil completo (ex: perfil ainda não salvo no banco),
-      // usa os dados do usuário logado como fallback garantido
       const userFallback = {
         id: currentUser?.id,
         name: currentUser?.name || 'Usuário',
@@ -263,7 +260,6 @@ function PostCard({ post, currentUser, onDelete }) {
 
 function timeAgo(date) {
   if (!date) return ''
-  // Supabase retorna datas sem 'Z', forçamos UTC adicionando-o
   const utcDate = date.endsWith('Z') ? date : date + 'Z'
   const diff = Date.now() - new Date(utcDate).getTime()
   if (diff < 0) return 'agora'
@@ -290,7 +286,8 @@ export default function Feed() {
   const [loading, setLoading] = useState(true)
   const [posting, setPosting] = useState(false)
   const [suggested, setSuggested] = useState([])
-  const [mediaFile, setMediaFile] = useState(null)   // { url, type, preview }
+  const [following, setFollowing] = useState([])
+  const [mediaFile, setMediaFile] = useState(null)
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState('')
   const [expanded, setExpanded] = useState(false)
@@ -308,35 +305,44 @@ export default function Feed() {
   useEffect(() => {
     fetchPosts()
     api.get('/users').then(r => setSuggested(r.data.slice(0, 3))).catch(() => {})
+    api.get('/users/me/following').then(r => setFollowing(r.data)).catch(() => {})
     intervalRef.current = setInterval(fetchPosts, 15000)
     return () => clearInterval(intervalRef.current)
   }, [])
 
+  const toggleFollow = async (id) => {
+    const isFollowing = following.includes(id)
+    try {
+      if (isFollowing) {
+        await api.delete(`/users/follow/${id}`)
+        setFollowing(f => f.filter(x => x !== id))
+      } else {
+        await api.post(`/users/follow/${id}`)
+        setFollowing(f => [...f, id])
+      }
+    } catch (e) {
+      console.error('Erro ao seguir', e)
+    }
+  }
+
   const handleFileSelect = async (e) => {
     const file = e.target.files[0]
     if (!file) return
-
     const isVideo = file.type.startsWith('video/')
     const isImage = file.type.startsWith('image/')
     if (!isVideo && !isImage) return
-
     setUploading(true)
     setUploadProgress(isVideo ? 'Enviando vídeo...' : 'Enviando imagem...')
-
     try {
       const reader = new FileReader()
       reader.onload = async (ev) => {
         const base64 = ev.target.result.split(',')[1]
-        const { data } = await api.post('/upload', {
-          base64,
-          fileName: file.name,
-          mimeType: file.type
-        })
+        const { data } = await api.post('/upload', { base64, fileName: file.name, mimeType: file.type })
         setMediaFile({ url: data.url, type: data.type, preview: ev.target.result })
         setUploadProgress('')
       }
       reader.readAsDataURL(file)
-    } catch (err) {
+    } catch {
       setUploadProgress('Erro no upload. Tente novamente.')
     } finally {
       setUploading(false)
@@ -355,13 +361,8 @@ export default function Feed() {
     setPosting(true)
     try {
       const payload = { content }
-      if (mediaFile?.type === 'image') {
-        payload.image = mediaFile.url
-        payload.media_type = 'image'
-      } else if (mediaFile?.type === 'video') {
-        payload.video = mediaFile.url
-        payload.media_type = 'video'
-      }
+      if (mediaFile?.type === 'image') { payload.image = mediaFile.url; payload.media_type = 'image' }
+      else if (mediaFile?.type === 'video') { payload.video = mediaFile.url; payload.media_type = 'video' }
       await api.post('/posts', payload)
       setContent('')
       setMediaFile(null)
@@ -392,11 +393,10 @@ export default function Feed() {
             <p className="profile-company">{user?.recruiter_company || user?.company || ''}</p>
             <div className="profile-stats">
               <div><span>Posts</span><strong>{posts.filter(p => p.author_id === user?.id).length}</strong></div>
-              <div><span>Conexões</span><strong>{suggested.length}</strong></div>
+              <div><span>Conexões</span><strong>{following.length}</strong></div>
             </div>
           </div>
         </div>
-
 
         {isRecruiter && (
           <button className="btn-primary recruiter-publish-btn" onClick={() => navigate("/vagas")}>
@@ -409,7 +409,6 @@ export default function Feed() {
       </aside>
 
       <main className="feed-main">
-        {/* Só usuários comuns podem publicar posts */}
         {!isRecruiter && (
           <form className="create-post card create-post-full" onSubmit={createPost}>
             <div className="create-post-top">
@@ -428,7 +427,6 @@ export default function Feed() {
               />
             </div>
 
-            {/* Preview de mídia */}
             {mediaFile && (
               <div className="media-preview">
                 {mediaFile.type === 'image'
@@ -443,22 +441,13 @@ export default function Feed() {
               </div>
             )}
 
-            {uploadProgress && (
-              <p className="upload-progress">{uploadProgress}</p>
-            )}
+            {uploadProgress && <p className="upload-progress">{uploadProgress}</p>}
 
-            {/* Barra de ações */}
             {expanded && (
               <div className="create-post-actions">
                 <div className="create-post-media-btns">
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/jpeg,image/png,image/gif,image/webp"
-                    style={{ display: 'none' }}
-                    onChange={handleFileSelect}
-                    id="img-upload"
-                  />
+                  <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/gif,image/webp"
+                    style={{ display: 'none' }} onChange={handleFileSelect} id="img-upload" />
                   <label htmlFor="img-upload" className="media-btn" title="Adicionar imagem">
                     <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/>
@@ -466,14 +455,8 @@ export default function Feed() {
                     </svg>
                     Imagem
                   </label>
-
-                  <input
-                    type="file"
-                    accept="video/mp4,video/webm,video/mov"
-                    style={{ display: 'none' }}
-                    onChange={handleFileSelect}
-                    id="vid-upload"
-                  />
+                  <input type="file" accept="video/mp4,video/webm,video/mov"
+                    style={{ display: 'none' }} onChange={handleFileSelect} id="vid-upload" />
                   <label htmlFor="vid-upload" className="media-btn" title="Adicionar vídeo">
                     <svg width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
                       <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2"/>
@@ -481,19 +464,14 @@ export default function Feed() {
                     Vídeo
                   </label>
                 </div>
-
-                <button
-                  type="submit"
-                  className="btn-primary create-publish-btn"
-                  disabled={posting || uploading || (!content.trim() && !mediaFile)}
-                >
+                <button type="submit" className="btn-primary create-publish-btn"
+                  disabled={posting || uploading || (!content.trim() && !mediaFile)}>
                   {posting ? <span className="btn-spinner" /> : 'Publicar'}
                 </button>
               </div>
             )}
           </form>
         )}
-
 
         {loading ? (
           <div className="feed-loading card">
@@ -506,12 +484,7 @@ export default function Feed() {
           </div>
         ) : (
           posts.map(post => (
-            <PostCard
-              key={post.id}
-              post={post}
-              currentUser={user}
-              onDelete={deletePost}
-            />
+            <PostCard key={post.id} post={post} currentUser={user} onDelete={deletePost} />
           ))
         )}
       </main>
@@ -538,7 +511,13 @@ export default function Feed() {
                     <strong>{p.name}</strong>
                     <span>{p.role || (p.account_type === 'recruiter' ? 'Recrutador' : 'Profissional')}</span>
                   </div>
-                  <button className="btn-primary" style={{padding:'5px 14px', fontSize:12}}>Conectar</button>
+                  <button
+                    className={following.includes(p.id) ? 'btn-outline conectado' : 'btn-primary'}
+                    style={{padding:'5px 14px', fontSize:12}}
+                    onClick={() => toggleFollow(p.id)}
+                  >
+                    {following.includes(p.id) ? 'Seguindo ✓' : '+ Seguir'}
+                  </button>
                 </li>
               ))}
             </ul>

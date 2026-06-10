@@ -123,4 +123,36 @@ router.delete('/me/certificates/:id', auth, async (req, res) => {
   res.json({ msg: 'ok' })
 })
 
+// --- FOLLOWS ---
+
+// Listar quem eu sigo (retorna array de IDs)
+router.get('/me/following', auth, async (req, res) => {
+  const { data, error } = await supabase
+    .from('follows')
+    .select('following_id')
+    .eq('follower_id', req.userId)
+  if (error) return res.status(500).json({ msg: error.message })
+  res.json(data.map(f => f.following_id))
+})
+
+// Seguir usuário
+router.post('/follow/:id', auth, async (req, res) => {
+  const { error } = await supabase
+    .from('follows')
+    .insert({ follower_id: req.userId, following_id: req.params.id })
+  if (error) return res.status(500).json({ msg: error.message })
+  res.json({ msg: 'Seguindo' })
+})
+
+// Deixar de seguir
+router.delete('/follow/:id', auth, async (req, res) => {
+  const { error } = await supabase
+    .from('follows')
+    .delete()
+    .eq('follower_id', req.userId)
+    .eq('following_id', req.params.id)
+  if (error) return res.status(500).json({ msg: error.message })
+  res.json({ msg: 'Deixou de seguir' })
+})
+
 module.exports = router

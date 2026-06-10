@@ -1,76 +1,106 @@
 import { useState, useEffect } from 'react'
 import api from '../services/api'
+import { useAuth } from '../context/AuthContext'
 import './Vagas.css'
-
-const MOCK_JOBS = [
-  {
-    id: '1', title: 'Senior Full Stack Developer', company: 'Tech Innovations',
-    location: 'São Paulo, SP (Remoto)', type: 'CLT', salary: 'R$ 15.000 - R$ 20.000',
-    description: 'Procuramos desenvolvedor full stack experiente para liderar projetos de alta complexidade usando React, Node.js e AWS.',
-    tags: ['React', 'Node.js', 'AWS', 'Docker', 'TypeScript'], candidates: 47, days: 2
-  },
-  {
-    id: '2', title: 'Machine Learning Engineer', company: 'AI Solutions',
-    location: 'Rio de Janeiro, RJ (Híbrido)', type: 'CLT', salary: 'R$ 18.000 - R$ 25.000',
-    description: 'Oportunidade para trabalhar com modelos de ML em produção, processamento de grandes volumes de dados e MLOps.',
-    tags: ['Python', 'TensorFlow', 'PyTorch', 'AWS', 'MLOps'], candidates: 89, days: 7
-  },
-  {
-    id: '3', title: 'DevOps Engineer', company: 'CloudStack',
-    location: 'Remoto', type: 'PJ', salary: 'R$ 12.000 - R$ 18.000',
-    description: 'Buscamos profissional para atuar com infraestrutura em nuvem, CI/CD e automação de processos.',
-    tags: ['Docker', 'Kubernetes', 'AWS', 'Terraform', 'Jenkins'], candidates: 31, days: 3
-  },
-  {
-    id: '4', title: 'UX/UI Designer', company: 'Creative Studio',
-    location: 'Belo Horizonte, MG (Híbrido)', type: 'CLT', salary: 'R$ 8.000 - R$ 12.000',
-    description: 'Procuramos designer criativo para criar experiências digitais incríveis para nossos clientes.',
-    tags: ['Figma', 'Design Systems', 'Prototyping', 'Adobe XD'], candidates: 55, days: 5
-  },
-  {
-    id: '5', title: 'Backend Developer', company: 'Fintech Corp',
-    location: 'São Paulo, SP (Presencial)', type: 'CLT', salary: 'R$ 10.000 - R$ 15.000',
-    description: 'Vaga para desenvolvedor backend focado em sistemas financeiros de alta disponibilidade.',
-    tags: ['Java', 'Spring Boot', 'PostgreSQL', 'Kafka'], candidates: 28, days: 1
-  },
-  {
-    id: '6', title: 'Data Scientist', company: 'Data Analytics Inc',
-    location: 'Remoto', type: 'Freela', salary: 'R$ 200/hora',
-    description: 'Projeto de 6 meses para análise de dados e criação de modelos preditivos para e-commerce.',
-    tags: ['Python', 'SQL', 'Machine Learning', 'Tableau'], candidates: 42, days: 4
-  },
-]
 
 const TIPOS = ['CLT', 'PJ', 'Freela', 'Estágio']
 const NIVEIS = ['Júnior', 'Pleno', 'Sênior', 'Tech Lead']
-const SKILLS = ['React', 'Node.js', 'Python', 'AWS', 'Docker']
+
+const EMPTY_FORM = {
+  title: '', company: '', location: '', type: 'CLT',
+  level: 'Pleno', salary: '', description: '', tags: ''
+}
 
 export default function Vagas() {
-  const [jobs, setJobs] = useState(MOCK_JOBS)
+  const { user } = useAuth()
+  const [jobs, setJobs] = useState([])
+  const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [tipos, setTipos] = useState([])
   const [niveis, setNiveis] = useState([])
   const [saved, setSaved] = useState([])
+  const [applications, setApplications] = useState([])
+  const [applyingId, setApplyingId] = useState(null)
+  const [showModal, setShowModal] = useState(false)
+  const [form, setForm] = useState(EMPTY_FORM)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  const isRecruiter = user?.account_type === 'recruiter' || user?.role === 'Recrutador'
+
+  const fetchJobs = () => {
+    setLoading(true)
+    api.get('/jobs')
+      .then(r => setJobs(r.data || []))
+      .catch(() => setJobs([]))
+      .finally(() => setLoading(false))
+  }
+
+  const fetchApplications = () => {
+    api.get('/jobs/my-applications')
+      .then(r => setApplications(r.data || []))
+      .catch(() => {})
+  }
 
   useEffect(() => {
-    api.get('/jobs').then(r => {
-      if (r.data.length > 0) setJobs(r.data)
-    }).catch(() => {})
+    fetchJobs()
+    fetchApplications()
   }, [])
 
   const toggleTipo = t => setTipos(v => v.includes(t) ? v.filter(x => x !== t) : [...v, t])
   const toggleNivel = n => setNiveis(v => v.includes(n) ? v.filter(x => x !== n) : [...v, n])
   const toggleSaved = id => setSaved(v => v.includes(id) ? v.filter(x => x !== id) : [...v, id])
 
+  const handleApply = async (jobId) => {
+    const applied = applications.includes(jobId)
+    setApplyingId(jobId)
+    try {
+      if (applied) {
+        await api.delete(`/jobs/${jobId}/apply`)
+        setApplications(v => v.filter(id => id !== jobId))
+      } else {
+        await api.post(`/jobs/${jobId}/apply`)
+        setApplications(v => [...v, jobId])
+      }
+    } catch (e) {
+      alert(e.response?.data?.msg || 'Erro ao candidatar-se.')
+    } finally {
+      setApplyingId(null)
+    }
+  }
+
   const filtered = jobs.filter(j => {
     const matchSearch = !search ||
       j.title?.toLowerCase().includes(search.toLowerCase()) ||
       j.company?.toLowerCase().includes(search.toLowerCase()) ||
-      j.tags?.some(t => t.toLowerCase().includes(search.toLowerCase()))
+      (Array.isArray(j.tags) ? j.tags : []).some(t => t.toLowerCase().includes(search.toLowerCase()))
     const matchTipo = tipos.length === 0 || tipos.includes(j.type)
     const matchNivel = niveis.length === 0 || niveis.includes(j.level)
     return matchSearch && matchTipo && matchNivel
   })
+
+  const handleSubmit = async () => {
+    if (!form.title || !form.company || !form.description) {
+      setError('Preencha título, empresa e descrição.')
+      return
+    }
+    setSubmitting(true)
+    setError('')
+    try {
+      const payload = {
+        ...form,
+        tags: form.tags ? form.tags.split(',').map(t => t.trim()).filter(Boolean) : []
+      }
+      await api.post('/jobs', payload)
+      setShowModal(false)
+      setForm(EMPTY_FORM)
+      fetchJobs()
+    } catch (e) {
+      setError(e.response?.data?.msg || 'Erro ao publicar vaga.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div className="vagas-layout">
@@ -82,16 +112,6 @@ export default function Vagas() {
           </svg>
           Filtros
         </h3>
-
-        <div className="filter-group">
-          <label>Localização</label>
-          <select>
-            <option>Todas</option>
-            <option>Remoto</option>
-            <option>São Paulo</option>
-            <option>Rio de Janeiro</option>
-          </select>
-        </div>
 
         <div className="filter-group">
           <label>Tipo de Contrato</label>
@@ -112,15 +132,6 @@ export default function Vagas() {
             </div>
           ))}
         </div>
-
-        <div className="filter-group">
-          <label>Habilidades</label>
-          <div className="filter-tags">
-            {SKILLS.map(s => (
-              <span key={s} className="tag" style={{cursor:'pointer'}}>{s}</span>
-            ))}
-          </div>
-        </div>
       </aside>
 
       {/* Lista */}
@@ -134,75 +145,165 @@ export default function Vagas() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
+          {isRecruiter && (
+            <button className="btn-primary" style={{whiteSpace:'nowrap', fontSize:13, padding:'8px 16px'}} onClick={() => setShowModal(true)}>
+              + Publicar Vaga
+            </button>
+          )}
         </div>
 
         <div className="vagas-count">
-          <span>{filtered.length} vagas encontradas</span>
+          {loading ? 'Carregando...' : `${filtered.length} vaga${filtered.length !== 1 ? 's' : ''} encontrada${filtered.length !== 1 ? 's' : ''}`}
         </div>
 
-        {filtered.map(job => (
-          <div key={job.id} className="job-card card">
-            <div className="job-header">
-              <div className="job-logo" style={{background: stringToColor(job.company)}}>
-                {job.company?.slice(0,2).toUpperCase()}
+        {!loading && filtered.length === 0 && (
+          <div className="card" style={{padding:40, textAlign:'center', color:'var(--text-muted)'}}>
+            <p style={{fontSize:15}}>Nenhuma vaga publicada ainda.</p>
+            {isRecruiter && (
+              <button className="btn-primary" style={{marginTop:16}} onClick={() => setShowModal(true)}>
+                Publicar primeira vaga
+              </button>
+            )}
+          </div>
+        )}
+
+        {filtered.map(job => {
+          const applied = applications.includes(job.id)
+          const isApplying = applyingId === job.id
+          return (
+            <div key={job.id} className="job-card card">
+              <div className="job-header">
+                <div className="job-logo" style={{background: stringToColor(job.company)}}>
+                  {job.company?.slice(0,2).toUpperCase()}
+                </div>
+                <div className="job-info">
+                  <h3>{job.title}</h3>
+                  <p className="job-company">{job.company}</p>
+                  <div className="job-meta">
+                    {job.location && (
+                      <span>
+                        <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
+                        </svg>
+                        {job.location}
+                      </span>
+                    )}
+                    {job.type && <span>{job.type}</span>}
+                    {job.level && <span>{job.level}</span>}
+                    {job.salary && (
+                      <span>
+                        <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                          <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                        </svg>
+                        {job.salary}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <button className="save-btn" onClick={() => toggleSaved(job.id)}>
+                  <svg width="18" height="18" fill={saved.includes(job.id) ? 'var(--brand)' : 'none'} stroke={saved.includes(job.id) ? 'var(--brand)' : 'currentColor'} strokeWidth="2" viewBox="0 0 24 24">
+                    <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
+                  </svg>
+                </button>
               </div>
-              <div className="job-info">
-                <h3>{job.title}</h3>
-                <p className="job-company">{job.company}</p>
-                <div className="job-meta">
-                  <span>
-                    <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/>
-                    </svg>
-                    {job.location}
-                  </span>
-                  <span>
-                    <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/>
-                    </svg>
-                    {job.type}
-                  </span>
-                  {job.salary && (
-                    <span>
-                      <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                        <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
-                      </svg>
-                      {job.salary}
-                    </span>
-                  )}
-                  <span>
-                    <svg width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                      <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                    </svg>
-                    {job.days || job.days_ago} {typeof job.days === 'number' ? `dias atrás` : ''}
-                  </span>
+
+              <p className="job-description">{job.description}</p>
+
+              {Array.isArray(job.tags) && job.tags.length > 0 && (
+                <div className="job-tags">
+                  {job.tags.map(t => <span key={t} className="tag">{t}</span>)}
+                </div>
+              )}
+
+              <div className="job-footer">
+                <span className="job-candidates">
+                  {new Date(job.created_at).toLocaleDateString('pt-BR')}
+                </span>
+                {!isRecruiter && (
+                  <button
+                    className={applied ? 'btn-outline' : 'btn-primary'}
+                    style={{fontSize:13, padding:'8px 20px'}}
+                    disabled={isApplying}
+                    onClick={() => handleApply(job.id)}
+                  >
+                    {isApplying ? '...' : applied ? 'Candidatura enviada ✓' : 'Candidatar-se'}
+                  </button>
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </main>
+
+      {/* Modal publicar vaga */}
+      {showModal && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2>Publicar Vaga</h2>
+              <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
+            </div>
+
+            <div className="modal-body">
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Título da vaga *</label>
+                  <input placeholder="Ex: Frontend Developer" value={form.title} onChange={e => setForm(f => ({...f, title: e.target.value}))} />
+                </div>
+                <div className="form-group">
+                  <label>Empresa *</label>
+                  <input placeholder="Nome da empresa" value={form.company} onChange={e => setForm(f => ({...f, company: e.target.value}))} />
                 </div>
               </div>
-              <button className="save-btn" onClick={() => toggleSaved(job.id)}>
-                <svg width="18" height="18" fill={saved.includes(job.id) ? 'var(--brand)' : 'none'} stroke={saved.includes(job.id) ? 'var(--brand)' : 'currentColor'} strokeWidth="2" viewBox="0 0 24 24">
-                  <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>
-                </svg>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Localização</label>
+                  <input placeholder="Ex: São Paulo, SP (Remoto)" value={form.location} onChange={e => setForm(f => ({...f, location: e.target.value}))} />
+                </div>
+                <div className="form-group">
+                  <label>Salário</label>
+                  <input placeholder="Ex: R$ 8.000 - R$ 12.000" value={form.salary} onChange={e => setForm(f => ({...f, salary: e.target.value}))} />
+                </div>
+              </div>
+
+              <div className="form-row">
+                <div className="form-group">
+                  <label>Tipo de contrato</label>
+                  <select value={form.type} onChange={e => setForm(f => ({...f, type: e.target.value}))}>
+                    {TIPOS.map(t => <option key={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Nível</label>
+                  <select value={form.level} onChange={e => setForm(f => ({...f, level: e.target.value}))}>
+                    {NIVEIS.map(n => <option key={n}>{n}</option>)}
+                  </select>
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>Descrição *</label>
+                <textarea rows={4} placeholder="Descreva a vaga, responsabilidades e requisitos..." value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} />
+              </div>
+
+              <div className="form-group">
+                <label>Tags / Tecnologias</label>
+                <input placeholder="Ex: React, Node.js, AWS (separe por vírgula)" value={form.tags} onChange={e => setForm(f => ({...f, tags: e.target.value}))} />
+              </div>
+
+              {error && <p className="form-error">{error}</p>}
+            </div>
+
+            <div className="modal-footer">
+              <button className="btn-outline" onClick={() => setShowModal(false)}>Cancelar</button>
+              <button className="btn-primary" onClick={handleSubmit} disabled={submitting}>
+                {submitting ? 'Publicando...' : 'Publicar Vaga'}
               </button>
             </div>
-
-            <p className="job-description">{job.description}</p>
-
-            <div className="job-tags">
-              {job.tags?.map(t => <span key={t} className="tag">{t}</span>)}
-            </div>
-
-            <div className="job-footer">
-              <span className="job-candidates">{job.candidates} candidatos</span>
-              <a href="#" className="btn-primary" style={{fontSize:13, padding:'8px 20px'}}>
-                Candidatar-se
-                <svg width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/>
-                </svg>
-              </a>
-            </div>
           </div>
-        ))}
-      </main>
+        </div>
+      )}
     </div>
   )
 }

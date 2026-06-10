@@ -17,6 +17,7 @@ app.use(express.json())
 app.use('/api/auth', require('./src/routes/authRoutes'))
 app.use('/api/users', require('./src/routes/userRoutes'))
 app.use('/api/posts', require('./src/routes/postRoutes'))
+app.use('/api/messages', require('./src/routes/messageRoutes'))
 app.use('/api/jobs', require('./src/routes/jobRoutes'))
 app.use('/api/upload', require('./src/routes/uploadRoutes'))
 

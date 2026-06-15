@@ -1,6 +1,7 @@
 const router = require("express").Router();
 const auth = require("../middlewares/authMiddleware");
 const supabase = require("../config/supabase");
+const { createNotification } = require("../utils/notifications");
 
 // Meu perfil completo
 router.get("/me", auth, async (req, res) => {
@@ -229,6 +230,17 @@ router.post("/follow/:id", auth, async (req, res) => {
     .from("follows")
     .insert({ follower_id: req.userId, following_id: req.params.id });
   if (error) return res.status(500).json({ msg: error.message });
+
+  await createNotification({
+    recipientId: req.params.id,
+    actorId: req.userId,
+    type: "follow",
+    title: "Novo seguidor",
+    message: "começou a seguir você.",
+    link: "/rede",
+    metadata: { follower_id: req.userId },
+  });
+
   res.json({ msg: "Seguindo" });
 });
 

@@ -1,6 +1,7 @@
 const router = require('express').Router()
 const auth = require('../middlewares/authMiddleware')
 const supabase = require('../config/supabase')
+const { createNotification } = require('../utils/notifications')
 
 // Pegar ou criar conversa entre dois usuários
 async function getOrCreateConversation(user1, user2) {
@@ -84,6 +85,25 @@ router.post('/:conversationId/messages', auth, async (req, res) => {
     .single()
 
   if (error) return res.status(500).json({ msg: error.message })
+
+  const { data: conv } = await supabase
+    .from('conversations')
+    .select('user1_id, user2_id')
+    .eq('id', req.params.conversationId)
+    .single()
+
+  const recipientId = conv?.user1_id === req.userId ? conv?.user2_id : conv?.user1_id
+
+  await createNotification({
+    recipientId,
+    actorId: req.userId,
+    type: 'message',
+    title: 'Nova mensagem',
+    message: `enviou uma mensagem: ${text.trim().slice(0, 80)}`,
+    link: '/mensagens',
+    metadata: { conversation_id: req.params.conversationId },
+  })
+
   res.status(201).json(data)
 })
 

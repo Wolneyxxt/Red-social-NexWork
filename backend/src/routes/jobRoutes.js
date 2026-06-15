@@ -1,6 +1,7 @@
 const router = require('express').Router()
 const auth = require('../middlewares/authMiddleware')
 const supabase = require('../config/supabase')
+const { createNotification } = require('../utils/notifications')
 
 // Listar vagas
 router.get('/', auth, async (req, res) => {
@@ -18,7 +19,7 @@ router.post('/', auth, async (req, res) => {
   const { title, company, location, type, level, salary, description, tags } = req.body
   const { data, error } = await supabase
     .from('jobs')
-    .insert({ title, company, location, type, level, salary, description, tags })
+    .insert({ title, company, location, type, level, salary, description, tags, recruiter_id: req.userId })
     .select()
     .single()
 
@@ -36,6 +37,23 @@ router.post('/:id/apply', auth, async (req, res) => {
     if (error.code === '23505') return res.status(400).json({ msg: 'Você já se candidatou a esta vaga.' })
     return res.status(500).json({ msg: error.message })
   }
+
+  const { data: job } = await supabase
+    .from('jobs')
+    .select('id, title, recruiter_id')
+    .eq('id', req.params.id)
+    .single()
+
+  await createNotification({
+    recipientId: job?.recruiter_id,
+    actorId: req.userId,
+    type: 'job_application',
+    title: 'Nova candidatura',
+    message: `candidatou-se à vaga ${job?.title || ''}.`.trim(),
+    link: '/vagas',
+    metadata: { job_id: req.params.id },
+  })
+
   res.status(201).json({ msg: 'Candidatura enviada!' })
 })
 

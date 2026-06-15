@@ -1,7 +1,8 @@
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { useTheme } from '../context/ThemeContext'
-import { useState } from 'react'
+import api from '../services/api'
+import { useEffect, useState } from 'react'
 import './Navbar.css'
 
 export default function Navbar() {
@@ -9,6 +10,66 @@ export default function Navbar() {
   const { dark, toggle } = useTheme()
   const navigate = useNavigate()
   const [showMenu, setShowMenu] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
+  const [notifications, setNotifications] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [loadingNotifications, setLoadingNotifications] = useState(false)
+
+  const fetchNotifications = async () => {
+    try {
+      const [{ data: list }, { data: countData }] = await Promise.all([
+        api.get('/notifications'),
+        api.get('/notifications/unread-count'),
+      ])
+      setNotifications(list || [])
+      setUnreadCount(countData?.count || 0)
+    } catch {
+      setNotifications([])
+      setUnreadCount(0)
+    }
+  }
+
+  useEffect(() => {
+    if (!user?.id) return
+    fetchNotifications()
+    const interval = setInterval(fetchNotifications, 15000)
+    return () => clearInterval(interval)
+  }, [user?.id])
+
+  const openNotifications = async () => {
+    const next = !showNotifications
+    setShowNotifications(next)
+    setShowMenu(false)
+    if (!next) return
+
+    setLoadingNotifications(true)
+    try {
+      await fetchNotifications()
+      await api.put('/notifications/read-all')
+      setUnreadCount(0)
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })))
+    } catch {} finally {
+      setLoadingNotifications(false)
+    }
+  }
+
+  const handleNotificationClick = async (notification) => {
+    try { await api.put(`/notifications/${notification.id}/read`) } catch {}
+    setShowNotifications(false)
+    navigate(notification.link || '/feed')
+  }
+
+  const formatNotificationTime = (date) => {
+    if (!date) return ''
+    const diff = Date.now() - new Date(date).getTime()
+    const minutes = Math.floor(diff / 60000)
+    if (minutes < 1) return 'agora'
+    if (minutes < 60) return `${minutes}min`
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h`
+    return `${Math.floor(hours / 24)}d`
+  }
+
   let hideTimeout = null
 
   const handleMouseEnter = () => { clearTimeout(hideTimeout); setShowMenu(true) }
@@ -93,12 +154,56 @@ export default function Navbar() {
           </button>
 
           {/* Notificações */}
-          <button className="notif-btn" title="Notificações">
-            <span className="notif-dot"/>
-            <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-            </svg>
-          </button>
+          <div className="notif-wrap">
+            <button className={`notif-btn ${unreadCount > 0 ? 'has-notifications' : ''}`} title="Notificações" onClick={openNotifications}>
+              {unreadCount > 0 && <span className="notif-dot"/>}
+              {unreadCount > 0 && <span className="notif-count">{unreadCount > 9 ? '9+' : unreadCount}</span>}
+              <svg width="17" height="17" fill="none" stroke="currentColor" strokeWidth="2" viewBox="0 0 24 24">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+              </svg>
+            </button>
+
+            {showNotifications && (
+              <div className="notifications-menu">
+                <div className="notifications-header">
+                  <strong>Notificações</strong>
+                  <span>{unreadCount > 0 ? `${unreadCount} nova${unreadCount > 1 ? 's' : ''}` : 'Tudo lido'}</span>
+                </div>
+
+                <div className="notifications-list">
+                  {loadingNotifications && (
+                    <div className="notifications-empty">Carregando...</div>
+                  )}
+
+                  {!loadingNotifications && notifications.length === 0 && (
+                    <div className="notifications-empty">Nenhuma notificação ainda.</div>
+                  )}
+
+                  {!loadingNotifications && notifications.map(notification => {
+                    const actorName = notification.actor?.name || 'Alguém'
+                    const actorAvatar = notification.actor?.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${actorName}`
+
+                    return (
+                      <button
+                        key={notification.id}
+                        className={`notification-item ${notification.read ? '' : 'unread'}`}
+                        onClick={() => handleNotificationClick(notification)}
+                      >
+                        <img src={actorAvatar} alt="" />
+                        <div className="notification-content">
+                          <div className="notification-title-row">
+                            <strong>{notification.title}</strong>
+                            <span>{formatNotificationTime(notification.created_at)}</span>
+                          </div>
+                          <p><b>{actorName}</b> {notification.message}</p>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Avatar + menu */}
           <div className="navbar-avatar-wrap" onMouseEnter={handleMouseEnter} onMouseLeave={handleMouseLeave}>

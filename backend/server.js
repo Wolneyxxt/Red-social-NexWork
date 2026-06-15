@@ -20,6 +20,7 @@ app.use('/api/posts', require('./src/routes/postRoutes'))
 app.use('/api/messages', require('./src/routes/messageRoutes'))
 app.use('/api/jobs', require('./src/routes/jobRoutes'))
 app.use('/api/upload', require('./src/routes/uploadRoutes'))
+app.use('/api/notifications', require('./src/routes/notificationRoutes'))
 
 app.get('/', (req, res) => res.json({ status: 'NexWork API rodando!' }))
 

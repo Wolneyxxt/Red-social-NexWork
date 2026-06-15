@@ -1,6 +1,7 @@
 const router = require('express').Router()
 const auth = require('../middlewares/authMiddleware')
 const supabase = require('../config/supabase')
+const { createNotification } = require('../utils/notifications')
 
 // Listar posts
 router.get('/', auth, async (req, res) => {
@@ -61,7 +62,25 @@ router.put('/:id/like', auth, async (req, res) => {
     await supabase.from('likes').delete().eq('user_id', req.userId).eq('post_id', id)
     return res.json({ liked: false })
   } else {
-    await supabase.from('likes').insert({ user_id: req.userId, post_id: id })
+    const { error: likeError } = await supabase.from('likes').insert({ user_id: req.userId, post_id: id })
+    if (likeError) return res.status(500).json({ msg: likeError.message })
+
+    const { data: post } = await supabase
+      .from('posts')
+      .select('author_id')
+      .eq('id', id)
+      .single()
+
+    await createNotification({
+      recipientId: post?.author_id,
+      actorId: req.userId,
+      type: 'like',
+      title: 'Nova curtida',
+      message: 'curtiu sua publicação.',
+      link: '/feed',
+      metadata: { post_id: id },
+    })
+
     return res.json({ liked: true })
   }
 })
@@ -75,6 +94,23 @@ router.post('/:id/comments', auth, async (req, res) => {
     .single()
 
   if (error) return res.status(500).json({ msg: error.message })
+
+  const { data: post } = await supabase
+    .from('posts')
+    .select('author_id')
+    .eq('id', req.params.id)
+    .single()
+
+  await createNotification({
+    recipientId: post?.author_id,
+    actorId: req.userId,
+    type: 'comment',
+    title: 'Novo comentário',
+    message: 'comentou na sua publicação.',
+    link: '/feed',
+    metadata: { post_id: req.params.id, comment_id: data?.id },
+  })
+
   res.status(201).json(data)
 })
 
